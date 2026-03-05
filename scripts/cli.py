@@ -85,7 +85,8 @@ def _headless_fallback(port: int) -> None:
                 "success": False,
                 "error": "未登录",
                 "message": "当前为无图形服务器环境，无法切换到有窗口模式。"
-                "请先在有图形环境的机器上登录并导出 cookies，或使用 cookie 文件登录。",
+                "请执行 login 命令获取二维码链接，在其他设备浏览器中打开扫码登录。"
+                "或使用 export-cookies / import-cookies 从已登录的机器导入 cookies。",
             },
             exit_code=1,
         )
@@ -121,8 +122,13 @@ def cmd_check_login(args: argparse.Namespace) -> None:
 
 
 def cmd_login(args: argparse.Namespace) -> None:
-    """获取登录二维码并等待扫码。"""
-    from xhs.login import fetch_qrcode, save_qrcode_to_file, wait_for_login
+    """获取登录二维码并等待扫码。
+
+    无图形环境下会尝试提取二维码 URL，用户可在其他设备浏览器中打开扫码。
+    """
+    from chrome_launcher import _has_display
+
+    from xhs.login import extract_qrcode_url, fetch_qrcode, save_qrcode_to_file, wait_for_login
 
     browser, page = _connect(args)
     try:
@@ -130,17 +136,35 @@ def cmd_login(args: argparse.Namespace) -> None:
         if already:
             _output({"logged_in": True, "message": "已登录"})
         else:
-            # 保存二维码到临时文件
-            qrcode_path = save_qrcode_to_file(src)
-            print(
-                json.dumps(
-                    {
-                        "qrcode_path": qrcode_path,
-                        "message": "请扫码登录，二维码已保存到文件",
-                    },
-                    ensure_ascii=False,
-                )
-            )
+            result: dict = {}
+
+            # 尝试通过 BarcodeDetector 提取二维码中的 URL
+            qrcode_url = extract_qrcode_url(page, src)
+            if qrcode_url:
+                result["qrcode_url"] = qrcode_url
+
+            if _has_display():
+                # 有图形环境：保存二维码图片
+                qrcode_path = save_qrcode_to_file(src)
+                result["qrcode_path"] = qrcode_path
+                result["message"] = "请扫码登录，二维码已保存到文件"
+            else:
+                # 无图形环境：依赖二维码 URL
+                if qrcode_url:
+                    result["message"] = (
+                        "无图形环境，请在其他设备浏览器中打开二维码链接，"
+                        "用小红书 App 扫描页面中的二维码登录"
+                    )
+                else:
+                    result["message"] = (
+                        "无图形环境且无法解析二维码链接。"
+                        "请使用 import-cookies 从已登录的机器导入 cookies。"
+                    )
+
+            # 先输出二维码信息
+            print(json.dumps(result, ensure_ascii=False))
+
+            # 等待扫码
             success = wait_for_login(page, timeout=120)
             _output(
                 {"logged_in": success, "message": "登录成功" if success else "登录超时"},
@@ -158,6 +182,70 @@ def cmd_delete_cookies(args: argparse.Namespace) -> None:
     path = get_cookies_file_path(args.account)
     delete_cookies(path)
     _output({"success": True, "message": f"已删除 cookies: {path}"})
+
+
+def cmd_export_cookies(args: argparse.Namespace) -> None:
+    """导出浏览器 cookies 到 JSON 文件。"""
+    import os
+
+    browser, page = _connect(args)
+    try:
+        cookies = page.get_all_cookies()
+        # 只保留小红书相关域名的 cookies
+        xhs_cookies = [
+            c for c in cookies if ".xiaohongshu.com" in c.get("domain", "")
+        ]
+        if not xhs_cookies:
+            _output(
+                {"success": False, "error": "未找到小红书 cookies，请先登录"},
+                exit_code=1,
+            )
+
+        output_path = os.path.abspath(args.output)
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(xhs_cookies, f, ensure_ascii=False, indent=2)
+
+        _output({
+            "success": True,
+            "count": len(xhs_cookies),
+            "path": output_path,
+            "message": f"已导出 {len(xhs_cookies)} 条 cookies 到 {output_path}",
+        })
+    finally:
+        browser.close_page(page)
+        browser.close()
+
+
+def cmd_import_cookies(args: argparse.Namespace) -> None:
+    """从 JSON 文件导入 cookies 到浏览器。"""
+    with open(args.input, encoding="utf-8") as f:
+        cookies = json.load(f)
+
+    if not isinstance(cookies, list) or not cookies:
+        _output(
+            {"success": False, "error": "cookies 文件格式无效，需要 JSON 数组"},
+            exit_code=2,
+        )
+
+    browser, page = _connect(args)
+    try:
+        page.set_cookies(cookies)
+
+        # 导入后验证登录状态
+        from xhs.login import check_login_status
+
+        logged_in = check_login_status(page)
+        _output({
+            "success": True,
+            "count": len(cookies),
+            "logged_in": logged_in,
+            "message": f"已导入 {len(cookies)} 条 cookies"
+            + ("，登录状态有效" if logged_in else "，但登录状态无效，cookies 可能已过期"),
+        })
+    finally:
+        browser.close_page(page)
+        browser.close()
 
 
 def cmd_list_feeds(args: argparse.Namespace) -> None:
@@ -585,6 +673,16 @@ def build_parser() -> argparse.ArgumentParser:
     # delete-cookies
     sub = subparsers.add_parser("delete-cookies", help="删除 cookies")
     sub.set_defaults(func=cmd_delete_cookies)
+
+    # export-cookies
+    sub = subparsers.add_parser("export-cookies", help="导出 cookies 到文件")
+    sub.add_argument("--output", required=True, help="输出文件路径（JSON）")
+    sub.set_defaults(func=cmd_export_cookies)
+
+    # import-cookies
+    sub = subparsers.add_parser("import-cookies", help="从文件导入 cookies")
+    sub.add_argument("--input", required=True, help="cookies 文件路径（JSON）")
+    sub.set_defaults(func=cmd_import_cookies)
 
     # list-feeds
     sub = subparsers.add_parser("list-feeds", help="获取首页 Feed 列表")

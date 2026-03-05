@@ -162,6 +162,24 @@ class Page:
         remote_obj = result.get("result", {})
         return remote_obj.get("value")
 
+    def evaluate_async(self, function_body: str) -> Any:
+        """执行异步 JavaScript 函数并等待 Promise 结果。
+
+        function_body 是一个 async 函数体，如 `async () => { return await fetch(...); }`
+        """
+        result = self._send_session(
+            "Runtime.evaluate",
+            {
+                "expression": f"({function_body})()",
+                "returnByValue": True,
+                "awaitPromise": True,
+            },
+        )
+        if "exceptionDetails" in result:
+            raise CDPError(f"JS 异步执行异常: {result['exceptionDetails']}")
+        remote_obj = result.get("result", {})
+        return remote_obj.get("value")
+
     def query_selector(self, selector: str) -> str | None:
         """查找单个元素，返回 objectId 或 None。"""
         result = self._send_session(
@@ -513,6 +531,17 @@ class Page:
             }})()
             """
         )
+
+    def get_all_cookies(self) -> list[dict]:
+        """导出浏览器所有 cookies（通过 CDP Network.getAllCookies）。"""
+        self._send_session("Network.enable")
+        result = self._send_session("Network.getAllCookies")
+        return result.get("cookies", [])
+
+    def set_cookies(self, cookies: list[dict]) -> None:
+        """导入 cookies（通过 CDP Network.setCookies）。"""
+        self._send_session("Network.enable")
+        self._send_session("Network.setCookies", {"cookies": cookies})
 
 
 class Browser:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import tempfile
@@ -51,6 +52,50 @@ def fetch_qrcode(page: Page) -> tuple[str, bool]:
         raise RuntimeError("二维码图片 src 为空")
 
     return src, False
+
+
+def extract_qrcode_url(page: Page, src: str) -> str | None:
+    """通过 Chrome BarcodeDetector API 解码二维码图片中的 URL。
+
+    利用浏览器内置的 BarcodeDetector（Chrome 83+）直接解码，零 Python 依赖。
+
+    Args:
+        page: CDP 页面对象（用于执行 JS）。
+        src: 二维码图片的 data URL 或普通 URL。
+
+    Returns:
+        解码出的 URL 字符串，失败返回 None。
+    """
+    js = """
+    async () => {
+        try {
+            const img = new Image();
+            img.src = SRC_PLACEHOLDER;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+            const detector = new BarcodeDetector({formats: ['qr_code']});
+            const results = await detector.detect(img);
+            if (results.length > 0) {
+                return results[0].rawValue;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
+    }
+    """.replace("SRC_PLACEHOLDER", json.dumps(src))
+
+    try:
+        result = page.evaluate_async(js)
+        if result:
+            logger.info("二维码 URL 解码成功")
+            return result
+    except Exception:
+        logger.debug("BarcodeDetector 解码失败，可能不支持")
+
+    return None
 
 
 def save_qrcode_to_file(src: str) -> str:

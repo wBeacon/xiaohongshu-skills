@@ -126,13 +126,15 @@ python scripts/publish_pipeline.py --title-file t.txt --content-file c.txt --ima
 
 ## CLI 子命令对照表
 
-scripts/cli.py 的 19 个子命令：
+scripts/cli.py 的 21 个子命令：
 
 | CLI 子命令 | 对应 MCP 工具 | 分类 |
 |--|--|--|
 | `check-login` | check_login_status | 认证 |
 | `login` | get_login_qrcode | 认证 |
 | `delete-cookies` | delete_cookies | 认证 |
+| `export-cookies` | — | 认证（cookie 导出） |
+| `import-cookies` | — | 认证（cookie 导入） |
 | `list-feeds` | list_feeds | 浏览 |
 | `search-feeds` | search_feeds | 浏览 |
 | `get-feed-detail` | get_feed_detail | 浏览 |
