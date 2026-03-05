@@ -118,6 +118,53 @@ STEALTH_JS = """
         get: () => window.innerHeight,
         configurable: true,
     });
+
+    // 12. headless 特征隐藏（--headless=new 仍有少量可检测特征）
+    // 12a. navigator.userAgentData — 确保 brands 不含 HeadlessChrome
+    if (navigator.userAgentData) {
+        const origBrands = navigator.userAgentData.brands;
+        const cleanBrands = origBrands
+            ? origBrands.map(b => ({
+                ...b,
+                brand: b.brand.replace(/Headless/gi, ''),
+            }))
+            : origBrands;
+        Object.defineProperty(navigator, 'userAgentData', {
+            get: () => ({
+                ...navigator.userAgentData,
+                brands: cleanBrands,
+                mobile: false,
+                platform: navigator.userAgentData.platform || 'Windows',
+            }),
+            configurable: true,
+        });
+    }
+
+    // 12b. userAgent 中的 HeadlessChrome 替换
+    const origUA = navigator.userAgent;
+    if (origUA.includes('HeadlessChrome')) {
+        Object.defineProperty(navigator, 'userAgent', {
+            get: () => origUA.replace('HeadlessChrome', 'Chrome'),
+            configurable: true,
+        });
+    }
+
+    // 12c. window.chrome.app — headless 模式下可能缺失
+    if (window.chrome && !window.chrome.app) {
+        window.chrome.app = {
+            isInstalled: false,
+            InstallState: {
+                DISABLED: 'disabled',
+                INSTALLED: 'installed',
+                NOT_INSTALLED: 'not_installed',
+            },
+            RunningState: {
+                CANNOT_RUN: 'cannot_run',
+                READY_TO_RUN: 'ready_to_run',
+                RUNNING: 'running',
+            },
+        };
+    }
 })();
 """
 

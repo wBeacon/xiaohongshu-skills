@@ -64,7 +64,17 @@ def run_publish_pipeline(
 
                 # Headless 自动降级：切换到有窗口模式
                 if headless:
-                    from chrome_launcher import restart_chrome
+                    from chrome_launcher import _has_display, restart_chrome
+
+                    if not _has_display():
+                        return {
+                            "success": False,
+                            "error": "未登录",
+                            "message": "当前为无图形服务器环境，无法切换到有窗口模式。"
+                            "请先在有图形环境的机器上登录并导出 cookies，"
+                            "或使用 cookie 文件登录。",
+                            "exit_code": 1,
+                        }
 
                     logger.info("Headless 模式未登录，切换到有窗口模式...")
                     restart_chrome(port=port, headless=False)

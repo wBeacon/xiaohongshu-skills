@@ -36,7 +36,8 @@ def _connect(args: argparse.Namespace):
     from chrome_launcher import ensure_chrome
     from xhs.cdp import Browser
 
-    if not ensure_chrome(port=args.port):
+    headless = getattr(args, "headless", False)
+    if not ensure_chrome(port=args.port, headless=headless):
         _output(
             {"success": False, "error": "无法启动 Chrome，请检查 Chrome 是否已安装"},
             exit_code=2,
@@ -53,7 +54,8 @@ def _connect_existing(args: argparse.Namespace):
     from chrome_launcher import ensure_chrome
     from xhs.cdp import Browser
 
-    if not ensure_chrome(port=args.port):
+    headless = getattr(args, "headless", False)
+    if not ensure_chrome(port=args.port, headless=headless):
         _output(
             {"success": False, "error": "无法连接到 Chrome"},
             exit_code=2,
@@ -71,8 +73,23 @@ def _connect_existing(args: argparse.Namespace):
 
 
 def _headless_fallback(port: int) -> None:
-    """Headless 模式未登录时自动降级到有窗口模式。"""
-    from chrome_launcher import restart_chrome
+    """Headless 模式未登录时自动降级到有窗口模式。
+
+    在无图形环境（Linux 无 DISPLAY）下不尝试降级，直接提示用户。
+    """
+    from chrome_launcher import _has_display, restart_chrome
+
+    if not _has_display():
+        _output(
+            {
+                "success": False,
+                "error": "未登录",
+                "message": "当前为无图形服务器环境，无法切换到有窗口模式。"
+                "请先在有图形环境的机器上登录并导出 cookies，或使用 cookie 文件登录。",
+            },
+            exit_code=1,
+        )
+        return
 
     logger.info("Headless 模式未登录，切换到有窗口模式...")
     restart_chrome(port=port, headless=False)
@@ -549,6 +566,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1", help="Chrome 调试主机 (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=9222, help="Chrome 调试端口 (default: 9222)")
     parser.add_argument("--account", default="", help="账号名称")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="无头模式（也可通过 XHS_HEADLESS=1 环境变量设置）",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -634,7 +656,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--original", action="store_true", help="声明原创")
     sub.add_argument("--visibility", help="可见范围")
-    sub.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
     sub.set_defaults(func=cmd_publish)
 
     # publish-video
@@ -645,7 +666,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--tags", nargs="*", help="标签")
     sub.add_argument("--schedule-at", help="定时发布 (ISO8601)")
     sub.add_argument("--visibility", help="可见范围")
-    sub.add_argument("--headless", action="store_true", help="无头模式（未登录自动降级）")
     sub.set_defaults(func=cmd_publish_video)
 
     # fill-publish（只填写图文表单，不发布）

@@ -18,6 +18,24 @@ from xhs.stealth import STEALTH_ARGS
 
 logger = logging.getLogger(__name__)
 
+
+def _is_headless_env() -> bool:
+    """检查环境变量是否指定无头模式。"""
+    return os.getenv("XHS_HEADLESS", "").lower() in ("1", "true", "yes")
+
+
+def _has_display() -> bool:
+    """检查当前环境是否有图形显示服务。
+
+    macOS / Windows 始终返回 True；Linux 检查 DISPLAY 或 WAYLAND_DISPLAY。
+    """
+    system = platform.system()
+    if system in ("Darwin", "Windows"):
+        return True
+    # Linux / 其他 Unix
+    return bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
+
+
 # 默认远程调试端口
 DEFAULT_PORT = 9222
 
@@ -250,6 +268,8 @@ def ensure_chrome(
     如果 Chrome 已在运行，直接返回 True。
     否则尝试启动 Chrome 并等待端口就绪。
 
+    headless 优先级: 参数显式传入 > 环境变量 XHS_HEADLESS > 默认 False。
+
     Args:
         port: 远程调试端口。
         headless: 是否无头模式（仅新启动时生效）。
@@ -262,9 +282,15 @@ def ensure_chrome(
     if is_port_open(port):
         return True
 
+    # 环境变量 XHS_HEADLESS 可覆盖默认值
+    effective_headless = headless or _is_headless_env()
+
     try:
         launch_chrome(
-            port=port, headless=headless, user_data_dir=user_data_dir, chrome_bin=chrome_bin,
+            port=port,
+            headless=effective_headless,
+            user_data_dir=user_data_dir,
+            chrome_bin=chrome_bin,
         )
         return is_port_open(port)
     except FileNotFoundError as e:
